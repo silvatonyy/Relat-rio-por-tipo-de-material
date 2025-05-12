@@ -1,0 +1,182 @@
+*&---------------------------------------------------------------------*
+*& Report  Z_ARS_REPORT_TYPE_MATERIAL
+*&
+*&---------------------------------------------------------------------*
+
+REPORT  z_ars_report_type_material.
+
+TYPE-POOLS: slis.   "(ALV)
+
+SELECTION-SCREEN: BEGIN OF BLOCK b1 WITH FRAME TITLE text-001.
+PARAMETERS: p_mtart TYPE mara-mtart OBLIGATORY,
+            p_werks TYPE marc-werks.
+SELECTION-SCREEN END OF BLOCK b1.
+
+TYPES:BEGIN OF ty_final,
+    matnr  TYPE mara-matnr,
+    maktx  TYPE makt-maktx,
+    mtart  TYPE mara-mtart,
+    werks  TYPE marc-werks,
+    status TYPE c LENGTH 1,
+    color  TYPE lvc_t_scol,    "Esse campo foi adicionado para podemos colocar cores no campo STATUS (ALV).
+END OF ty_final.
+
+
+DATA: it_final    TYPE TABLE OF ty_final,
+      wa_final    TYPE ty_final,
+      it_mara     TYPE TABLE OF mara,
+      it_makt     TYPE TABLE OF makt,
+      it_marc     TYPE TABLE OF marc,
+      wa_makt     TYPE makt,
+      wa_marc     TYPE marc,
+      wa_mara     TYPE mara,
+      it_fieldcat TYPE lvc_t_fcat,    "(ALV)
+      wa_fieldcat TYPE lvc_s_fcat,    "(ALV)
+      lt_color    TYPE lvc_t_scol,    "(ALV)
+      ls_color    TYPE lvc_s_scol,    "(ALV)
+      ls_layout   TYPE lvc_s_layo.   "Strutura criada do tipo lvc_s_layo (ALV)
+
+
+START-OF-SELECTION.
+
+  PERFORM zf_selection.
+
+  PERFORM build_fieldcat.
+
+  PERFORM display_alv.
+*&---------------------------------------------------------------------*
+*&      Form  BUILD_FIELDCAT
+*&---------------------------------------------------------------------*
+FORM build_fieldcat .
+  CLEAR it_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-fieldname = 'MATNR'.
+  wa_fieldcat-seltext   = 'Código Material'.
+  wa_fieldcat-reptext   = 'Código Material'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-fieldname = 'MAKTX'.
+  wa_fieldcat-seltext   = 'Descrição'.
+  wa_fieldcat-reptext   = 'Descrição'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-fieldname = 'MTART'.
+  wa_fieldcat-seltext   = 'Tipo Material'.
+  wa_fieldcat-reptext   = 'Tipo Material'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-fieldname = 'WERKS'.
+  wa_fieldcat-seltext   = 'Centro'.
+  wa_fieldcat-reptext   = 'Centro'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+  CLEAR wa_fieldcat.
+  wa_fieldcat-fieldname = 'STATUS'.
+  wa_fieldcat-seltext   = 'status'.
+  wa_fieldcat-reptext   = 'Status'.
+  APPEND wa_fieldcat TO it_fieldcat.
+
+
+ENDFORM.                    " BUILD_FIELDCAT
+*&---------------------------------------------------------------------*
+*&      Form  ZF_SELECTION
+*&---------------------------------------------------------------------*
+FORM zf_selection .
+
+  SELECT *
+     FROM mara
+     INTO TABLE it_mara
+     WHERE mtart = p_mtart.
+
+  IF it_mara IS INITIAL.
+    MESSAGE 'Nenhuma material encontrado com esse tipo' TYPE 'I'.
+  ENDIF.
+
+  SELECT *
+    FROM makt
+    INTO TABLE it_makt
+    FOR ALL ENTRIES IN it_mara
+    WHERE matnr = it_mara-matnr
+      AND spras = sy-langu.
+
+  IF p_werks IS NOT INITIAL.
+    SELECT *
+      FROM marc
+      INTO TABLE it_marc
+      FOR ALL ENTRIES IN it_mara
+      WHERE matnr = it_mara-matnr
+      AND werks   = p_werks.
+  ENDIF.
+
+  LOOP AT it_mara INTO wa_mara.
+    CLEAR: wa_final,
+           lt_color,    "(ALV)
+           ls_color.    "(ALV)
+
+    wa_final-matnr = wa_mara-matnr.
+    wa_final-mtart = wa_mara-mtart.
+
+    READ TABLE it_makt INTO wa_makt WITH KEY matnr = wa_mara-matnr.
+    IF sy-subrc = 0.
+      wa_final-maktx = wa_makt-maktx.
+    ENDIF.
+
+    IF p_werks IS NOT INITIAL.
+      READ TABLE it_marc INTO wa_marc WITH KEY matnr = wa_mara-matnr werks = p_werks.
+      IF sy-subrc = 0.
+        wa_final-werks  = wa_marc-werks.
+        wa_final-status = 'G'. " Verde
+      ELSE.
+        wa_final-status = 'R'. " Vermelho
+      ENDIF.
+    ELSE.
+      wa_final-status = 'G'.
+    ENDIF.
+
+    CASE wa_final-status.
+      WHEN 'G'.
+        ls_color-fname     = 'STATUS'.       "Campo que recebera a cor (ALV)
+        ls_color-color-col = '5'.            " Esse número é o valor da cor ou seja o número 5 equivale a cor Verde (ALV)
+      WHEN 'R'.
+        ls_color-fname     = 'STATUS'.
+        ls_color-color-col = '6'. " Vermelho
+      WHEN OTHERS.
+        ls_color-fname     = 'STATUS'.
+        ls_color-color-col = '3'. " Amarelo
+    ENDCASE.
+
+    APPEND ls_color TO lt_color.    "(ALV)
+    wa_final-color = lt_color.
+
+
+    APPEND wa_final TO it_final.
+  ENDLOOP.
+
+ENDFORM.                    " ZF_SELECTION
+*&---------------------------------------------------------------------*
+*&      Form  DISPLAY_ALV
+*&---------------------------------------------------------------------*
+FORM display_alv .
+
+  ls_layout-ctab_fname = 'COLOR'.    "O campo da strutura ls_layout foi apontado para o campo COLOR (ALV)
+
+  CALL FUNCTION 'REUSE_ALV_GRID_DISPLAY_LVC'
+    EXPORTING
+      i_callback_program = sy-repid
+      is_layout_lvc      = ls_layout     "Foi corrigido o parâmetro para is_layout_lvc (não is_layout) na chamada do ALV
+      it_fieldcat_lvc    = it_fieldcat
+    TABLES
+      t_outtab           = it_final
+    EXCEPTIONS
+      program_error      = 1
+      OTHERS             = 2.
+  IF sy-subrc <> 0.
+    MESSAGE ID sy-msgid TYPE sy-msgty NUMBER sy-msgno
+            WITH sy-msgv1 sy-msgv2 sy-msgv3 sy-msgv4.
+  ENDIF.
+
+ENDFORM.                    " DISPLAY_ALV
